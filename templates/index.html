@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daily Nexus Update</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Daily video pipeline</p>
+          <h1>Daily Nexus Update</h1>
+          <p class="lede">
+            Turn fresh news into a narrated video with screenshots, voiceover, and optional YouTube upload.
+          </p>
+        </div>
+        <aside class="panel">
+          <h2>Required inputs</h2>
+          <ul>
+            <li>GEMINI_API_KEY in <code>.env</code></li>
+            <li>ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID</li>
+            <li>Google OAuth client secret JSON for YouTube upload</li>
+            <li>Optional custom font and background music paths</li>
+          </ul>
+        </aside>
+      </section>
+
+      <section class="grid">
+        <form id="job-form" class="card">
+          <h2>Start a run</h2>
+          <label>
+            Topics
+            <input name="topics" value="tech, finance, crypto, geopolitics" />
+          </label>
+          <label>
+            Max stories
+            <input name="max_stories" type="number" value="5" min="1" max="10" />
+          </label>
+          <label>
+            Title suffix
+            <input name="title_suffix" value="Daily News Brief" />
+          </label>
+          <label class="check">
+            <input name="publish_to_youtube" type="checkbox" />
+            Publish to YouTube if upload credentials are ready
+          </label>
+          <button type="submit">Generate video</button>
+        </form>
+
+        <section class="card status-card">
+          <h2>Status</h2>
+          <pre id="status">Idle.</pre>
+          <div id="result"></div>
+        </section>
+      </section>
+    </main>
+    <script>
+      const form = document.getElementById("job-form");
+      const status = document.getElementById("status");
+      const result = document.getElementById("result");
+
+      async function waitForJob(url) {
+        while (true) {
+          const response = await fetch(url);
+          const payload = await response.json();
+          status.textContent = JSON.stringify(payload, null, 2);
+          if (["completed", "failed"].includes(payload.state)) {
+            if (payload.result?.youtube_url) {
+              result.innerHTML = `<p><a href="${payload.result.youtube_url}" target="_blank" rel="noreferrer">Open uploaded video</a></p>`;
+            } else if (payload.result?.video_path) {
+              result.innerHTML = `<p>Video saved at ${payload.result.video_path}</p>`;
+            }
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "Starting job...";
+        result.innerHTML = "";
+        const data = new FormData(form);
+        const topics = data.get("topics").split(",").map((topic) => topic.trim()).filter(Boolean);
+        const body = {
+          topics,
+          max_stories: Number(data.get("max_stories")),
+          publish_to_youtube: data.get("publish_to_youtube") === "on",
+          title_suffix: data.get("title_suffix"),
+        };
+        const response = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        status.textContent = JSON.stringify(payload, null, 2);
+        await waitForJob(payload.status_url);
+      });
+    </script>
+  </body>
+  </html>
