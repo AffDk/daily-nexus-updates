@@ -23,6 +23,7 @@ class StoryRequest(BaseModel):
 
 class StoryItem(BaseModel):
     title: str
+    display_title: str = ""
     summary: str
     topic: str
     source_name: str = ""

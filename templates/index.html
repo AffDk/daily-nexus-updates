@@ -67,10 +67,26 @@
           const payload = await response.json();
           status.textContent = JSON.stringify(payload, null, 2);
           if (["completed", "failed"].includes(payload.state)) {
+            const stories = payload.result?.stories || [];
+            const references = stories
+              .map((story) => {
+                const firstReference = story.reference_urls?.[0];
+                if (!firstReference) {
+                  return "";
+                }
+                return `<li><strong>${story.title}</strong>: <a href="${firstReference}" target="_blank" rel="noreferrer noopener">Source</a></li>`;
+              })
+              .filter(Boolean)
+              .join("");
+
             if (payload.result?.youtube_url) {
               result.innerHTML = `<p><a href="${payload.result.youtube_url}" target="_blank" rel="noreferrer">Open uploaded video</a></p>`;
             } else if (payload.result?.video_path) {
               result.innerHTML = `<p>Video saved at ${payload.result.video_path}</p>`;
+            }
+
+            if (references) {
+              result.innerHTML += `<h3>References</h3><ul>${references}</ul>`;
             }
             return;
           }

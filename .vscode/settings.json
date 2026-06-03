@@ -1,0 +1,10 @@
+{
+    "specstory.cloudSync.enabled": "never",
+    "chat.tools.terminal.autoApprove": {
+        "uv": true,
+        "/^cd c:\\\\local\\\\my_project_attempts\\\\daily_nexus_update ; uv run python -c \"import httpx,re,html\nq='finance chart market graph no people'\nu='https://www\\.bing\\.com/images/search'\nr=httpx\\.get\\(u,params=\\{'q':q,'form':'HDRSC3','first':'1'\\},timeout=25,follow_redirects=True,headers=\\{'User-Agent':'Mozilla/5\\.0'\\}\\)\nprint\\('status',r\\.status_code,'len',len\\(r\\.text\\)\\)\nm=re\\.findall\\(r'\\\\\"murl\\\\\":\\\\\"\\(\\.\\*\\?\\)\\\\\"',r\\.text\\)\nprint\\('matches',len\\(m\\)\\)\nfor x in m\\[:5\\]:\n  print\\(html\\.unescape\\(x\\)\\)\n\" 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

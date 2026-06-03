@@ -9,7 +9,7 @@ from pathlib import Path
 from app.config import Settings, get_settings
 from app.models import PipelineResult, StoryItem, StoryRequest
 from app.services.elevenlabs_client import generate_voiceover
-from app.services.gemini_client import fetch_major_stories
+from app.services.gemini_client import fetch_major_stories, shorten_headline_for_video
 from app.services.narration import build_closing_line, build_story_narration_script, build_voiceover_script
 from app.services.reference_resolver import resolve_reference_resources
 from app.services.screenshotter import capture_screenshot
@@ -81,6 +81,15 @@ def _allocate_story_durations(settings: Settings, stories: list[StoryItem]) -> l
 
 def _story_word_target(duration_seconds: int) -> int:
     return max(260, min(650, int(duration_seconds * 2.15)))
+
+
+def _needs_headline_shortening(headline: str) -> bool:
+    compact = " ".join(headline.split())
+    if len(compact) > 110:
+        return True
+    if len(compact.split()) > 16:
+        return True
+    return False
 
 
 def _is_transient_api_error(exc: Exception) -> bool:
@@ -179,6 +188,7 @@ def run_pipeline(
                         str(url),
                         screenshots_dir / resolved.topic,
                         f"{resolved.topic}_{index}_{resolved.title}",
+                        query_hint=f"{resolved.title} {resolved.topic} news",
                     )
                     resolved.screenshot_paths.append(str(screenshot))
                 except Exception as exc:  # noqa: BLE001 - keep story if one source fails
@@ -193,6 +203,28 @@ def run_pipeline(
     for story, duration_seconds in zip(resolved_stories, story_durations, strict=True):
         story.target_seconds = duration_seconds
         story.importance_score = _status_bonus(story.memory_status) * _topic_bonus(story.topic)
+
+    _set_progress(48, "Optimizing long headlines for on-screen cards")
+    for story in resolved_stories:
+        story.display_title = story.title
+        if not _needs_headline_shortening(story.title):
+            continue
+        try:
+            story.display_title = _call_with_retry(
+                provider="Gemini",
+                action=f"headline shorten for '{story.title[:42]}'",
+                progress=48,
+                operation=lambda story=story: shorten_headline_for_video(
+                    settings=settings,
+                    headline=story.title,
+                    topic=story.topic,
+                    summary=story.summary,
+                    max_chars=95,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - keep pipeline running with original title
+            logger.warning("Headline shortening failed for %s (%s)", story.title, exc)
+            story.display_title = story.title
 
     memory_store.record(resolved_stories)
 
@@ -218,30 +250,39 @@ def run_pipeline(
     narration = build_voiceover_script(resolved_stories, title, closing_line)
     story_audio_dir = job_dir / "audio" / "stories"
     outro_audio_dir = job_dir / "audio" / "outro"
+    outro_audio: Path | None = None
+    result_audio_path = ""
 
-    _set_progress(70, "Generating ElevenLabs voiceover audio")
-    for index, story in enumerate(resolved_stories, start=1):
-        audio_path = story_audio_dir / f"story_{index:02d}_{story.topic}.mp3"
-        story.audio_path = str(
-            _call_with_retry(
-                provider="ElevenLabs",
-                action=f"audio for '{story.title}'",
-                progress=70,
-                operation=lambda story=story, audio_path=audio_path: generate_voiceover(
-                    settings,
-                    story.narration_script,
-                    story_audio_dir,
-                    audio_path,
-                ),
+    if settings.enable_voiceover:
+        _set_progress(70, "Generating ElevenLabs voiceover audio")
+        for index, story in enumerate(resolved_stories, start=1):
+            audio_path = story_audio_dir / f"story_{index:02d}_{story.topic}.mp3"
+            story.audio_path = str(
+                _call_with_retry(
+                    provider="ElevenLabs",
+                    action=f"audio for '{story.title}'",
+                    progress=70,
+                    operation=lambda story=story, audio_path=audio_path: generate_voiceover(
+                        settings,
+                        story.narration_script,
+                        story_audio_dir,
+                        audio_path,
+                    ),
+                )
             )
-        )
+            result_audio_path = story.audio_path
 
-    outro_audio = _call_with_retry(
-        provider="ElevenLabs",
-        action="outro audio",
-        progress=70,
-        operation=lambda: generate_voiceover(settings, closing_line, outro_audio_dir, outro_audio_dir / "closing.mp3"),
-    )
+        outro_audio = _call_with_retry(
+            provider="ElevenLabs",
+            action="outro audio",
+            progress=70,
+            operation=lambda: generate_voiceover(settings, closing_line, outro_audio_dir, outro_audio_dir / "closing.mp3"),
+        )
+        result_audio_path = str(outro_audio)
+    else:
+        _set_progress(70, "Voiceover disabled by configuration; rendering silent cut")
+        for story in resolved_stories:
+            story.audio_path = ""
 
     total_duration_seconds = settings.intro_seconds + settings.outro_seconds + sum(story.target_seconds for story in resolved_stories)
     if total_duration_seconds > settings.max_video_seconds:
@@ -280,7 +321,7 @@ def run_pipeline(
         narration=narration,
         closing_line=closing_line,
         stories=resolved_stories,
-        audio_path=str(audio_path),
+        audio_path=result_audio_path,
         video_path=str(video_path),
         total_duration_seconds=total_duration_seconds,
         youtube_video_id=youtube_video_id,

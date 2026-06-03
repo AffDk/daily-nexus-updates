@@ -70,3 +70,40 @@ JSON shape:
             )
         )
     return stories
+
+
+def shorten_headline_for_video(
+    settings: Settings,
+    headline: str,
+    topic: str,
+    summary: str,
+    max_chars: int = 95,
+) -> str:
+    client = genai.Client(api_key=settings.gemini_api_key)
+    prompt = f"""
+You rewrite news headlines for on-screen video overlays.
+Return plain text only (no markdown, no quotes).
+
+Requirements:
+- Keep factual meaning unchanged.
+- Keep it punchy and clear.
+- No clickbait.
+- Max length: {max_chars} characters.
+- Topic context: {topic}
+
+Original headline: {headline}
+Story summary: {summary}
+""".strip()
+
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+        config={"temperature": 0.1},
+    )
+
+    candidate = (response.text or "").strip().strip('"')
+    if not candidate:
+        return headline[:max_chars].rstrip()
+    if len(candidate) > max_chars:
+        return candidate[: max_chars - 1].rstrip() + "…"
+    return candidate

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str = Field(default="", alias="ELEVENLABS_VOICE_ID")
     elevenlabs_model_id: str = Field(default="eleven_multilingual_v2", alias="ELEVENLABS_MODEL_ID")
+    enable_voiceover: bool = Field(default=False, alias="ENABLE_VOICEOVER")
 
     youtube_client_secrets_file: Path = Field(
         default=Path("secrets/youtube_client_secret.json"),

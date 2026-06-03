@@ -20,6 +20,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+# Suppress per-request access logs (polling endpoints can break in-place progress bars).
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, debug=settings.debug)

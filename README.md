@@ -6,13 +6,15 @@ FastAPI app that produces a daily news video package for tech, finance, crypto, 
 - stores prior coverage in a local memory file so repeats are suppressed unless updated
 - prunes detailed memory older than 90 days into a compact archive index so storage stays bounded
 - captures screenshots of the reference pages
-- generates story-length voiceover segments with ElevenLabs, then crossfades them into one video under 15 minutes
+- generates story-length voiceover segments with ElevenLabs (optional), then crossfades them into one video under 15 minutes
 - optionally uploads the finished video to YouTube
 
 ## What you need to provide
 
 1. Create a Gemini API key and place it in `.env` as `GEMINI_API_KEY`.
 2. Create an ElevenLabs API key, choose a voice, and set `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`.
+	- Set `ENABLE_VOICEOVER=false` to skip ElevenLabs entirely and render a silent cut.
+	- Set `ENABLE_VOICEOVER=true` when you are ready to generate real voiceover audio.
 3. For YouTube uploads, create OAuth 2.0 desktop credentials in Google Cloud and save the downloaded client secret JSON at the path in `YOUTUBE_CLIENT_SECRETS_FILE`.
 4. Run the app once and sign in to YouTube when prompted. The token file is stored at `YOUTUBE_TOKEN_FILE` and ignored by git.
 5. If you want a custom font or background music, set `FONT_PATH` or `BACKGROUND_MUSIC_FILE` to local files on your machine.
@@ -49,6 +51,19 @@ FastAPI app that produces a daily news video package for tech, finance, crypto, 
 	- `RETRY_DELAY_SECONDS` (default `300`)
 	- `RETRY_BACKOFF_MULTIPLIER` (default `1.0` for fixed delay)
 - Job status message shows when a retry is pending and how long until the next attempt.
+
+## Reference capture fallback behavior
+
+- Some news sites block automation or show consent/privacy interstitials to bots.
+- The pipeline first tries a browser screenshot.
+- If that is blocked, it tries to download a related image from article metadata (`og:image` / `twitter:image`).
+- If metadata images are unavailable, it falls back to a topical image query.
+- Pages that technically load but are still invalid (for example `404`, `page not found`, anti-bot challenge pages) are rejected and treated as failed captures.
+- If all image retrieval fails, a generated fallback card is used so the story still appears in the video.
+- Story cards show `Reference: <domain>` as on-screen context.
+- Clickable `Reference` links are available in two places:
+	- the dashboard result section after a run
+	- `output/<run>/video/references.html` (opens links in a new tab)
 
 ## Output folder naming
 
@@ -96,6 +111,16 @@ Open `http://127.0.0.1:8000` and trigger a job from the dashboard.
 3. Download the client secret JSON and store it outside git.
 4. Launch a job with `publish_to_youtube` enabled in the UI or request payload.
 5. Complete browser consent once; future runs reuse the saved token file.
+
+## Retry upload of an existing video
+
+If rendering already succeeded and you only want to retry YouTube upload, run:
+
+```powershell
+uv run python -m app.cli --upload-video "output/2026-06-02_18-19-15/video/daily_nexus_update.mp4" --youtube-title "Daily Nexus Update Test" --youtube-description "OAuth test upload"
+```
+
+This reuses your existing OAuth settings and token flow without running the full story/screenshot/video pipeline.
 
 ## Project layout
 
