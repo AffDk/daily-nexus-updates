@@ -79,10 +79,6 @@ def _allocate_story_durations(settings: Settings, stories: list[StoryItem]) -> l
     return durations
 
 
-def _story_word_target(duration_seconds: int) -> int:
-    return max(260, min(650, int(duration_seconds * 2.15)))
-
-
 def _needs_headline_shortening(headline: str) -> bool:
     compact = " ".join(headline.split())
     if len(compact) > 110:
@@ -242,7 +238,7 @@ def run_pipeline(
                 settings,
                 story,
                 memory_store.memory_context_text(),
-                _story_word_target(story.target_seconds),
+                story.target_seconds,
             ),
         )
         narration_segments.append(story.narration_script)
@@ -250,11 +246,32 @@ def run_pipeline(
     narration = build_voiceover_script(resolved_stories, title, closing_line)
     story_audio_dir = job_dir / "audio" / "stories"
     outro_audio_dir = job_dir / "audio" / "outro"
+    intro_audio_dir = job_dir / "audio" / "intro"
+    intro_audio: Path | None = None
     outro_audio: Path | None = None
     result_audio_path = ""
 
     if settings.enable_voiceover:
-        _set_progress(70, "Generating ElevenLabs voiceover audio")
+        _set_progress(68, "Generating ElevenLabs intro audio")
+        topics_label = ", ".join(dict.fromkeys(s.topic for s in resolved_stories))
+        intro_text = (
+            f"Hello and welcome to {title}. "
+            f"Today's briefing covers {len(resolved_stories)} stories across {topics_label}. "
+            "Let's get into it."
+        )
+        try:
+            intro_audio = _call_with_retry(
+                provider="ElevenLabs",
+                action="intro audio",
+                progress=68,
+                operation=lambda: generate_voiceover(
+                    settings, intro_text, intro_audio_dir, intro_audio_dir / "intro.mp3"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - intro greeting is required when voiceover is enabled
+            raise RuntimeError(f"ElevenLabs intro greeting audio failed: {exc}") from exc
+
+        _set_progress(70, "Generating ElevenLabs story audio")
         for index, story in enumerate(resolved_stories, start=1):
             audio_path = story_audio_dir / f"story_{index:02d}_{story.topic}.mp3"
             story.audio_path = str(
@@ -299,6 +316,7 @@ def run_pipeline(
             closing_line,
             outro_audio,
             job_dir / "video",
+            intro_audio_path=intro_audio,
         )
     except Exception as exc:  # noqa: BLE001 - rewrapped with source context
         raise RuntimeError(f"Video render failed: {exc}") from exc

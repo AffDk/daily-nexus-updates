@@ -6,6 +6,66 @@ from app.config import Settings
 from app.models import StoryItem
 
 
+_FORBIDDEN_ENDING_PHRASES = (
+    "now let's look at",
+    "let's look at the following",
+    "coming up",
+    "next up",
+    "in the next story",
+    "we'll cover next",
+    "more on that later",
+    "to be continued",
+)
+
+_LEADING_GREETING_PATTERNS = (
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "hello",
+    "hi everyone",
+    "welcome",
+    "welcome back",
+)
+
+
+def _strip_leading_greeting(script: str) -> str:
+    text = (script or "").strip()
+    if not text:
+        return text
+
+    normalized = text.lower()
+    for phrase in _LEADING_GREETING_PATTERNS:
+        if normalized.startswith(phrase):
+            # Remove first sentence if it is just a greeting/sign-on line.
+            split_idx = text.find(".")
+            if split_idx != -1 and split_idx < 160:
+                return text[split_idx + 1 :].strip()
+            return text[len(phrase) :].lstrip(" ,:-")
+    return text
+
+
+def _ensure_complete_story_ending(script: str, story: StoryItem) -> str:
+    text = _strip_leading_greeting(script)
+    if not text:
+        return text
+
+    normalized = " ".join(text.lower().split())
+    has_forbidden_ending = any(phrase in normalized[-180:] for phrase in _FORBIDDEN_ENDING_PHRASES)
+    ends_with_terminal_punctuation = text.endswith((".", "!", "?", '"'))
+
+    if has_forbidden_ending:
+        text = text.rstrip(" .,:;-")
+        text = (
+            f"{text}. For now, this is the clearest verified picture of {story.topic}, "
+            "and we will track changes as they happen."
+        )
+
+    if not ends_with_terminal_punctuation:
+        text = text.rstrip(" .,:;-") + "."
+
+    return text
+
+
 def _closing_line(stories: list[StoryItem]) -> str:
     if not stories:
         return "The news cycle clocked out early today. Subscribe so you do not miss tomorrow's update."
@@ -56,7 +116,7 @@ def build_closing_line(stories: list[StoryItem]) -> str:
 
 
 def _fallback_story_script(story: StoryItem, target_seconds: int) -> str:
-    target_words = max(260, min(650, int(target_seconds * 2.15)))
+    target_words = max(40, int(target_seconds * 2.2))
     related_note = story.memory_note or ""
     parts = [
         f"{story.title}. {story.summary}",
@@ -81,18 +141,21 @@ def build_story_narration_script(settings: Settings, story: StoryItem, memory_co
         return _fallback_story_script(story, target_seconds)
 
     client = genai.Client(api_key=settings.gemini_api_key)
-    target_words = max(260, min(650, int(target_seconds * 2.15)))
+    target_words = max(40, int(target_seconds * 2.2))
     prompt = f"""
 Write a spoken news segment for a daily news video.
 
 Constraints:
-- Length: about {target_words} words.
+- Length: exactly about {target_words} words — do NOT write more than {int(target_words * 1.05)} words.
 - Tone: natural, confident, emotionally aware, not robotic.
+- Do NOT open with any greeting, welcome, sign-on, or filler phrase (e.g. "Good morning", "Hello everyone", "Welcome back", "Next up", "Moving on to"). Begin immediately with the story's key fact or headline.
+- Do NOT end with any farewell, sign-off, or closing phrase (e.g. "That's all for now", "Thanks for watching", "See you next time", "Stay tuned", "Goodbye", "Until next time"). Those belong only in the show outro.
+- End with a complete, self-contained final sentence. Never end with teaser/transition lines like "coming up", "next we'll cover", or "now let's look at the following".
 - Use short pauses with ellipses when a beat should land.
 - Use only the supplied facts and context.
 - If this is an update, explicitly say what changed.
 - If this is related to prior coverage, refer back to it as a follow-up.
-- End with a bridge into the next story.
+- You may include a bridge sentence, but it must still sound complete and final by itself.
 
 Story title: {story.title}
 Topic: {story.topic}
@@ -114,4 +177,4 @@ Related coverage notes: {"; ".join(story.related_coverage_notes) or 'none'}
         return _fallback_story_script(story, target_seconds)
     if len(script.split()) < target_words:
         script = f"{script}\n\n{_fallback_story_script(story, target_seconds)}"
-    return script
+    return _ensure_complete_story_ending(script, story)

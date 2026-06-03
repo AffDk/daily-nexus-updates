@@ -260,8 +260,17 @@ def _create_outro_card(settings: Settings, title: str, closing_line: str, output
     return output_path
 
 
-def _attach_audio(clip: ImageClip, audio_path: Path, fade_seconds: float) -> ImageClip:
-    audio = AudioFileClip(str(audio_path)).with_effects([afx.AudioFadeIn(fade_seconds), afx.AudioFadeOut(fade_seconds)])
+def _attach_audio(
+    clip: ImageClip,
+    audio_path: Path,
+    fade_seconds: float,
+    max_duration: float | None = None,
+) -> ImageClip:
+    audio = AudioFileClip(str(audio_path))
+    if max_duration is not None and audio.duration > max_duration:
+        audio = audio.subclipped(0, max_duration)
+    safe_fade = min(fade_seconds, max(0.05, float(audio.duration) * 0.45))
+    audio = audio.with_effects([afx.AudioFadeIn(safe_fade), afx.AudioFadeOut(safe_fade)])
     return clip.with_audio(audio)
 
 
@@ -304,6 +313,7 @@ def build_video(
     closing_line: str,
     outro_audio_path: Path | None,
     output_dir: Path,
+    intro_audio_path: Path | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     intro_path = _create_title_card(
@@ -313,8 +323,20 @@ def build_video(
         output_path=output_dir / "intro.png",
     )
 
-    clips = [ImageClip(str(intro_path)).with_duration(settings.intro_seconds).with_effects([vfx.FadeIn(0.8), vfx.FadeOut(0.8)])]
-    has_any_audio = False
+    intro_clip = ImageClip(str(intro_path)).with_duration(settings.intro_seconds).with_effects([vfx.FadeIn(0.8), vfx.FadeOut(0.8)])
+    if intro_audio_path and Path(intro_audio_path).exists():
+        intro_audio_probe = AudioFileClip(str(intro_audio_path))
+        raw_intro_dur = max(1.0, float(intro_audio_probe.duration or 0.0))
+        intro_audio_probe.close()
+        intro_dur = max(raw_intro_dur, float(settings.intro_seconds))
+        intro_clip = intro_clip.with_duration(intro_dur)
+        intro_clip = _attach_audio(
+            intro_clip,
+            intro_audio_path,
+            settings.audio_crossfade_seconds,
+        )
+    clips = [intro_clip]
+    has_any_audio = intro_audio_path is not None and Path(intro_audio_path or "").exists()
     current_topic: str = ""
 
     for story in stories:
@@ -337,14 +359,21 @@ def build_video(
         story_card = _prepare_story_card(settings, story, screenshot, output_dir)
         if story.audio_path and Path(story.audio_path).exists():
             audio_probe = AudioFileClip(str(Path(story.audio_path)))
-            audio_duration = max(1.0, float(audio_probe.duration or 0.0))
+            raw_audio_duration = max(1.0, float(audio_probe.duration or 0.0))
             audio_probe.close()
+            audio_duration = raw_audio_duration
             clip = (
                 ImageClip(str(story_card))
                 .with_duration(audio_duration)
                 .with_effects([vfx.FadeIn(0.5), vfx.FadeOut(0.5)])
             )
-            clips.append(_attach_audio(clip, Path(story.audio_path), settings.audio_crossfade_seconds))
+            clips.append(
+                _attach_audio(
+                    clip,
+                    Path(story.audio_path),
+                    settings.audio_crossfade_seconds,
+                )
+            )
             has_any_audio = True
         else:
             silent_duration = max(1, story.target_seconds or settings.min_story_seconds)
@@ -363,14 +392,21 @@ def build_video(
     )
     if outro_audio_path and Path(outro_audio_path).exists():
         outro_audio_probe = AudioFileClip(str(outro_audio_path))
-        outro_audio_duration = max(1.0, float(outro_audio_probe.duration or 0.0))
+        raw_outro_duration = max(1.0, float(outro_audio_probe.duration or 0.0))
         outro_audio_probe.close()
+        outro_audio_duration = max(raw_outro_duration, float(settings.outro_seconds))
         outro_clip = (
             ImageClip(str(outro_path))
             .with_duration(outro_audio_duration)
             .with_effects([vfx.FadeIn(0.4), vfx.FadeOut(0.8)])
         )
-        clips.append(_attach_audio(outro_clip, outro_audio_path, settings.audio_crossfade_seconds))
+        clips.append(
+            _attach_audio(
+                outro_clip,
+                outro_audio_path,
+                settings.audio_crossfade_seconds,
+            )
+        )
         has_any_audio = True
     else:
         outro_clip = (
@@ -383,8 +419,7 @@ def build_video(
     if not clips:
         raise ValueError("No visual assets available to build video")
 
-    padding = -settings.audio_crossfade_seconds if has_any_audio else 0
-    video = concatenate_videoclips(clips, method="compose", padding=padding)
+    video = concatenate_videoclips(clips, padding=0)
     target = output_dir / "daily_nexus_update.mp4"
     video.write_videofile(
         str(target),
