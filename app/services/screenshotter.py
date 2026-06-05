@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-import textwrap
 from pathlib import Path
 from urllib.parse import quote_plus
 from urllib.parse import urlparse
@@ -153,48 +152,7 @@ def _build_fallback_card(target: Path, url: str, label: str, reason: str) -> Pat
     return target
 
 
-def _headline_from_label(label: str) -> str:
-    # Label format: <topic>_<index>_<headline>; keep only the headline part.
-    parts = label.split("_", 2)
-    raw = parts[2] if len(parts) == 3 else label
-    cleaned = raw.replace("_", " ").strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned[:220] if cleaned else "Daily Nexus Update"
-
-
-def _draw_headline_box(draw: ImageDraw.ImageDraw, headline: str) -> None:
-    try:
-        title_font = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 52)
-    except Exception:
-        title_font = ImageFont.load_default()
-
-    wrapped = textwrap.wrap(headline, width=44)[:3]
-    if not wrapped:
-        wrapped = ["Daily Nexus Update"]
-
-    lines = len(wrapped)
-    line_height = 66 if getattr(title_font, "size", 0) >= 40 else 22
-    text_block_h = lines * line_height + (lines - 1) * 8
-    box_pad_x = 48
-    box_pad_y = 26
-    box_h = text_block_h + box_pad_y * 2
-    y0 = 900 - box_h - 42
-    y1 = 900 - 42
-    x0 = 90
-    x1 = 1440 - 90
-
-    draw.rounded_rectangle((x0, y0, x1, y1), radius=22, fill=(0, 0, 0, 170))
-
-    current_y = y0 + box_pad_y
-    for line in wrapped:
-        bbox = draw.textbbox((0, 0), line, font=title_font)
-        text_w = bbox[2] - bbox[0]
-        tx = (1440 - text_w) // 2
-        draw.text((tx, current_y), line, font=title_font, fill=(238, 244, 252))
-        current_y += line_height + 8
-
-
-def _build_topic_visual_fallback(target: Path, topic: str, label: str, reason: str) -> Path:
+def _build_topic_visual_fallback(target: Path, topic: str, _label: str, reason: str) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     image = Image.new("RGB", (1440, 900), color=(14, 22, 36))
     draw = ImageDraw.Draw(image)
@@ -244,8 +202,6 @@ def _build_topic_visual_fallback(target: Path, topic: str, label: str, reason: s
         topic_font = ImageFont.load_default()
 
     draw.text((90, 70), topic.upper(), font=topic_font, fill=(242, 246, 252))
-    _draw_headline_box(draw, _headline_from_label(label))
-
     image.save(target)
     return target
 

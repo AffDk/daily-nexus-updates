@@ -10,7 +10,12 @@ from app.config import Settings, get_settings
 from app.models import PipelineResult, StoryItem, StoryRequest
 from app.services.elevenlabs_client import generate_voiceover
 from app.services.gemini_client import fetch_major_stories, shorten_headline_for_video
-from app.services.narration import build_closing_line, build_story_narration_script, build_voiceover_script
+from app.services.narration import (
+    build_closing_line,
+    build_story_narration_script,
+    build_topic_transition_line,
+    build_voiceover_script,
+)
 from app.services.reference_resolver import resolve_reference_resources
 from app.services.screenshotter import capture_screenshot
 from app.services.story_memory import StoryMemoryStore
@@ -254,8 +259,10 @@ def run_pipeline(
     if settings.enable_voiceover:
         _set_progress(68, "Generating ElevenLabs intro audio")
         topics_label = ", ".join(dict.fromkeys(s.topic for s in resolved_stories))
+        today_label = datetime.now().strftime("%A, %d %B %Y")
         intro_text = (
             f"Hello and welcome to {title}. "
+            f"Today is {today_label}. "
             f"Today's briefing covers {len(resolved_stories)} stories across {topics_label}. "
             "Let's get into it."
         )
@@ -289,6 +296,29 @@ def run_pipeline(
             )
             result_audio_path = story.audio_path
 
+        transition_audio_by_topic: dict[str, str] = {}
+        prior_topic: str | None = None
+        for story in resolved_stories:
+            if story.topic in transition_audio_by_topic:
+                prior_topic = story.topic
+                continue
+            transition_script = build_topic_transition_line(prior_topic, story.topic)
+            transition_audio_path = story_audio_dir / f"transition_{story.topic}.mp3"
+            transition_audio_by_topic[story.topic] = str(
+                _call_with_retry(
+                    provider="ElevenLabs",
+                    action=f"topic transition for '{story.topic}'",
+                    progress=70,
+                    operation=lambda transition_script=transition_script, transition_audio_path=transition_audio_path: generate_voiceover(
+                        settings,
+                        transition_script,
+                        story_audio_dir,
+                        transition_audio_path,
+                    ),
+                )
+            )
+            prior_topic = story.topic
+
         outro_audio = _call_with_retry(
             provider="ElevenLabs",
             action="outro audio",
@@ -298,6 +328,7 @@ def run_pipeline(
         result_audio_path = str(outro_audio)
     else:
         _set_progress(70, "Voiceover disabled by configuration; rendering silent cut")
+        transition_audio_by_topic = {}
         for story in resolved_stories:
             story.audio_path = ""
 
@@ -317,13 +348,14 @@ def run_pipeline(
             outro_audio,
             job_dir / "video",
             intro_audio_path=intro_audio,
+            transition_audio_by_topic=transition_audio_by_topic,
         )
     except Exception as exc:  # noqa: BLE001 - rewrapped with source context
         raise RuntimeError(f"Video render failed: {exc}") from exc
 
     youtube_video_id = None
     youtube_url = None
-    if request.publish_to_youtube or settings.youtube_upload_enabled:
+    if request.publish_to_youtube:
         _set_progress(95, "Uploading to YouTube")
         try:
             youtube_video_id = upload_video(settings, video_path, title, _build_description(resolved_stories)) or None

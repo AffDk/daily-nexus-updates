@@ -29,6 +29,10 @@ Requirements:
 - Story count: {request.max_stories}
 - Each story must include: title, summary, topic, source_name, source_url, reference_urls
 - Prefer major, timely, factual items with reputable reference URLs.
+- Audience focus: European citizens.
+- Prioritize stories by direct relevance and impact for people living in Europe (policy, economy, security, energy, technology, markets, mobility, regulation, cross-border effects).
+- Deprioritize stories that are mainly domestic to non-European countries when European impact is weak or absent.
+- If a globally important event is included, explain the European angle in the summary.
 - Keep URLs publicly accessible and suitable for screenshot capture.
 - Do not repeat stories already covered unless there is a clear update.
 - When a story is a follow-up, make it a material update and mention the relation in the summary.

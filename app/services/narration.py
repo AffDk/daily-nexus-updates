@@ -84,8 +84,12 @@ def _closing_line(stories: list[StoryItem]) -> str:
 
 
 def build_voiceover_script(stories: list[StoryItem], title: str, closing_line: str) -> str:
+    from datetime import datetime
+
+    today_label = datetime.now().strftime("%A, %d %B %Y")
     lines = [
         f"Welcome to {title}.",
+        f"Today is {today_label}.",
         "Today’s briefing moves through the stories that matter most, with space between the beats so each update lands clearly.",
     ]
 
@@ -113,6 +117,23 @@ def build_voiceover_script(stories: list[StoryItem], title: str, closing_line: s
 
 def build_closing_line(stories: list[StoryItem]) -> str:
     return _closing_line(stories)
+
+
+def build_topic_transition_line(previous_topic: str | None, next_topic: str) -> str:
+    prev_label = (previous_topic or "").strip().lower()
+    next_label = (next_topic or "general").strip().lower()
+
+    topic_bits = {
+        "tech": "From microchips to macro consequences, tech never really does quiet mode.",
+        "finance": "Time to check the markets, where charts can move faster than coffee cools.",
+        "crypto": "Now to crypto, where volatility still treats calm as a temporary bug.",
+        "geopolitics": "Next, geopolitics, where every sentence has footnotes and consequences.",
+    }
+
+    opener = topic_bits.get(next_label, f"Next, we switch to {next_topic}.")
+    if not prev_label:
+        return f"First stop: {next_topic}. {opener}"
+    return f"Quick pivot from {previous_topic} to {next_topic}. {opener}"
 
 
 def _fallback_story_script(story: StoryItem, target_seconds: int) -> str:
@@ -147,7 +168,12 @@ Write a spoken news segment for a daily news video.
 
 Constraints:
 - Length: exactly about {target_words} words — do NOT write more than {int(target_words * 1.05)} words.
-- Tone: natural, confident, emotionally aware, not robotic.
+- Audience: generally informed viewers who are interested in the topic but not necessarily experts.
+- Tone: natural, confident, emotionally aware, conversational, and engaging; not robotic.
+- Use plain, clear wording over technical jargon. If a technical term is necessary, briefly explain it in everyday language.
+- Keep sentences mostly short to medium length, with a strong flow suitable for spoken narration.
+- Avoid overly formal, academic, legalistic, or dense phrasing.
+- Keep depth and nuance: do not oversimplify facts, but make them easy to follow on first listen.
 - Do NOT open with any greeting, welcome, sign-on, or filler phrase (e.g. "Good morning", "Hello everyone", "Welcome back", "Next up", "Moving on to"). Begin immediately with the story's key fact or headline.
 - Do NOT end with any farewell, sign-off, or closing phrase (e.g. "That's all for now", "Thanks for watching", "See you next time", "Stay tuned", "Goodbye", "Until next time"). Those belong only in the show outro.
 - End with a complete, self-contained final sentence. Never end with teaser/transition lines like "coming up", "next we'll cover", or "now let's look at the following".

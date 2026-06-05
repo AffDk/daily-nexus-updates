@@ -314,6 +314,7 @@ def build_video(
     outro_audio_path: Path | None,
     output_dir: Path,
     intro_audio_path: Path | None = None,
+    transition_audio_by_topic: dict[str, str] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     intro_path = _create_title_card(
@@ -338,6 +339,7 @@ def build_video(
     clips = [intro_clip]
     has_any_audio = intro_audio_path is not None and Path(intro_audio_path or "").exists()
     current_topic: str = ""
+    transition_audio_by_topic = transition_audio_by_topic or {}
 
     for story in stories:
         if not story.screenshot_paths:
@@ -347,11 +349,21 @@ def build_video(
         if story.topic != current_topic:
             separator_path = output_dir / f"topic_{story.topic}.png"
             _create_topic_card(settings, story.topic, separator_path)
-            separator_clip = (
-                ImageClip(str(separator_path))
-                .with_duration(2.0)
-                .with_effects([vfx.FadeIn(1.0), vfx.FadeOut(1.0)])
+            separator_duration = 2.0
+            transition_audio = Path(transition_audio_by_topic.get(story.topic, ""))
+            if transition_audio.exists():
+                transition_probe = AudioFileClip(str(transition_audio))
+                transition_duration = max(1.0, float(transition_probe.duration or 0.0))
+                transition_probe.close()
+                separator_duration = max(separator_duration, transition_duration)
+
+            separator_clip = ImageClip(str(separator_path)).with_duration(separator_duration).with_effects(
+                [vfx.FadeIn(1.0), vfx.FadeOut(1.0)]
             )
+
+            if transition_audio.exists():
+                separator_clip = _attach_audio(separator_clip, transition_audio, settings.audio_crossfade_seconds)
+                has_any_audio = True
             clips.append(separator_clip)
             current_topic = story.topic
 
