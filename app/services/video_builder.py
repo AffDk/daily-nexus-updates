@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import textwrap
 from html import escape
 from pathlib import Path
 from urllib.parse import urlparse
-import textwrap
 
 from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, vfx, afx
 from PIL import Image, ImageDraw, ImageFont
@@ -325,7 +325,7 @@ def build_video(
     )
 
     intro_clip = ImageClip(str(intro_path)).with_duration(settings.intro_seconds).with_effects([vfx.FadeIn(0.8), vfx.FadeOut(0.8)])
-    if intro_audio_path and Path(intro_audio_path).exists():
+    if intro_audio_path and Path(intro_audio_path).is_file():
         intro_audio_probe = AudioFileClip(str(intro_audio_path))
         raw_intro_dur = max(1.0, float(intro_audio_probe.duration or 0.0))
         intro_audio_probe.close()
@@ -337,7 +337,6 @@ def build_video(
             settings.audio_crossfade_seconds,
         )
     clips = [intro_clip]
-    has_any_audio = intro_audio_path is not None and Path(intro_audio_path or "").exists()
     current_topic: str = ""
     transition_audio_by_topic = transition_audio_by_topic or {}
 
@@ -350,8 +349,9 @@ def build_video(
             separator_path = output_dir / f"topic_{story.topic}.png"
             _create_topic_card(settings, story.topic, separator_path)
             separator_duration = 2.0
-            transition_audio = Path(transition_audio_by_topic.get(story.topic, ""))
-            if transition_audio.exists():
+            transition_audio_value = (transition_audio_by_topic.get(story.topic) or "").strip()
+            transition_audio = Path(transition_audio_value) if transition_audio_value else None
+            if transition_audio and transition_audio.is_file():
                 transition_probe = AudioFileClip(str(transition_audio))
                 transition_duration = max(1.0, float(transition_probe.duration or 0.0))
                 transition_probe.close()
@@ -361,15 +361,14 @@ def build_video(
                 [vfx.FadeIn(1.0), vfx.FadeOut(1.0)]
             )
 
-            if transition_audio.exists():
+            if transition_audio and transition_audio.is_file():
                 separator_clip = _attach_audio(separator_clip, transition_audio, settings.audio_crossfade_seconds)
-                has_any_audio = True
             clips.append(separator_clip)
             current_topic = story.topic
 
         screenshot = Path(story.screenshot_paths[0])
         story_card = _prepare_story_card(settings, story, screenshot, output_dir)
-        if story.audio_path and Path(story.audio_path).exists():
+        if story.audio_path and Path(story.audio_path).is_file():
             audio_probe = AudioFileClip(str(Path(story.audio_path)))
             raw_audio_duration = max(1.0, float(audio_probe.duration or 0.0))
             audio_probe.close()
@@ -386,7 +385,6 @@ def build_video(
                     settings.audio_crossfade_seconds,
                 )
             )
-            has_any_audio = True
         else:
             silent_duration = max(1, story.target_seconds or settings.min_story_seconds)
             clip = (
@@ -402,7 +400,7 @@ def build_video(
         closing_line=closing_line,
         output_path=output_dir / "outro.png",
     )
-    if outro_audio_path and Path(outro_audio_path).exists():
+    if outro_audio_path and Path(outro_audio_path).is_file():
         outro_audio_probe = AudioFileClip(str(outro_audio_path))
         raw_outro_duration = max(1.0, float(outro_audio_probe.duration or 0.0))
         outro_audio_probe.close()
@@ -419,7 +417,6 @@ def build_video(
                 settings.audio_crossfade_seconds,
             )
         )
-        has_any_audio = True
     else:
         outro_clip = (
             ImageClip(str(outro_path))

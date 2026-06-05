@@ -1,0 +1,26 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: daily-nexus-update:latest
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./output:/app/output
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+    restart: unless-stopped
+
+  runner:
+    image: daily-nexus-update:latest
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+    entrypoint: ["python", "-m", "app.cli"]
+    profiles: ["runner"]

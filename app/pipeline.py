@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
+
+from moviepy import AudioFileClip
 
 from app.config import Settings, get_settings
 from app.models import PipelineResult, StoryItem, StoryRequest
@@ -75,7 +77,7 @@ def _allocate_story_durations(settings: Settings, stories: list[StoryItem]) -> l
     weights = [(_status_bonus(story.memory_status) * _topic_bonus(story.topic)) for story in stories]
     weight_total = sum(weights) or float(len(stories))
     durations = []
-    for index, story in enumerate(stories):
+    for index, _story in enumerate(stories):
         share = story_budget * (weights[index] / weight_total)
         duration = int(round(share))
         duration = max(settings.min_story_seconds, min(settings.max_story_seconds, duration))
@@ -109,6 +111,14 @@ def _is_transient_api_error(exc: Exception) -> bool:
         "rate limit",
     )
     return any(marker in text for marker in markers)
+
+
+def _audio_duration_seconds(audio_path: Path) -> float:
+    probe = AudioFileClip(str(audio_path))
+    try:
+        return max(0.0, float(probe.duration or 0.0))
+    finally:
+        probe.close()
 
 
 def run_pipeline(
@@ -199,6 +209,11 @@ def run_pipeline(
     if not resolved_stories:
         raise ValueError("No fresh or updated stories available after memory filtering")
 
+    # Group stories by topic, preserving first-seen topic order and importance order within each topic.
+    # This prevents back-and-forth topic switching and eliminates redundant transition cards.
+    _topic_seen_order = list(dict.fromkeys(s.topic for s in resolved_stories))
+    resolved_stories.sort(key=lambda s: _topic_seen_order.index(s.topic))
+
     _set_progress(40, "Allocating segment durations")
     story_durations = _allocate_story_durations(settings, resolved_stories)
     for story, duration_seconds in zip(resolved_stories, story_durations, strict=True):
@@ -281,10 +296,39 @@ def run_pipeline(
         _set_progress(70, "Generating ElevenLabs story audio")
         for index, story in enumerate(resolved_stories, start=1):
             audio_path = story_audio_dir / f"story_{index:02d}_{story.topic}.mp3"
-            story.audio_path = str(
-                _call_with_retry(
+            render_path = _call_with_retry(
+                provider="ElevenLabs",
+                action=f"audio for '{story.title}'",
+                progress=70,
+                operation=lambda story=story, audio_path=audio_path: generate_voiceover(
+                    settings,
+                    story.narration_script,
+                    story_audio_dir,
+                    audio_path,
+                ),
+            )
+
+            # Keep runtime within budget by shortening script and re-synthesizing, never by clipping audio.
+            max_story_audio = float(max(1, story.target_seconds)) + 1.5
+            duration = _audio_duration_seconds(render_path)
+            tighten_attempt = 0
+            while duration > max_story_audio and tighten_attempt < 2:
+                tighten_attempt += 1
+                tightened_target = max(20, int(story.target_seconds * (0.9 - 0.08 * tighten_attempt)))
+                story.narration_script = _call_with_retry(
+                    provider="Gemini",
+                    action=f"tighten narration for '{story.title}'",
+                    progress=70,
+                    operation=lambda story=story, tightened_target=tightened_target: build_story_narration_script(
+                        settings,
+                        story,
+                        memory_store.memory_context_text(),
+                        tightened_target,
+                    ),
+                )
+                render_path = _call_with_retry(
                     provider="ElevenLabs",
-                    action=f"audio for '{story.title}'",
+                    action=f"shorter audio for '{story.title}'",
                     progress=70,
                     operation=lambda story=story, audio_path=audio_path: generate_voiceover(
                         settings,
@@ -293,7 +337,17 @@ def run_pipeline(
                         audio_path,
                     ),
                 )
-            )
+                duration = _audio_duration_seconds(render_path)
+
+            if duration > max_story_audio:
+                logger.warning(
+                    "Story audio still above target after tightening: '%s' %.1fs > %.1fs",
+                    story.title,
+                    duration,
+                    max_story_audio,
+                )
+
+            story.audio_path = str(render_path)
             result_audio_path = story.audio_path
 
         transition_audio_by_topic: dict[str, str] = {}

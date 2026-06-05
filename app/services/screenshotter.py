@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 from pathlib import Path
-from urllib.parse import quote_plus
-from urllib.parse import urlparse
-from urllib.parse import urljoin
 from urllib.parse import parse_qs
+from urllib.parse import quote_plus
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
@@ -252,6 +254,30 @@ def _is_wikimedia_image_url(image_url: str) -> bool:
 def _is_likely_human_image_url(image_url: str) -> bool:
     lowered = image_url.lower()
     return any(marker in lowered for marker in _HUMAN_IMAGE_MARKERS)
+
+
+def _resolve_chromium_executable() -> str | None:
+    env_path = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "").strip()
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    candidates = (
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+    )
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+
+    for binary_name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        resolved = shutil.which(binary_name)
+        if resolved:
+            return resolved
+
+    return None
 
 
 def _matches_non_human_topic_keywords(image_url: str, topic_hint: str) -> bool:
@@ -576,7 +602,16 @@ def capture_screenshot(url: str, output_dir: Path, label: str, query_hint: str =
     target = output_dir / f"{_sanitize_filename(label)}.png"
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        launch_kwargs: dict[str, object] = {"headless": True}
+        executable_path = _resolve_chromium_executable()
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+
+        # Root-run environments (containers/VPS bootstrap) need no-sandbox args.
+        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+            launch_kwargs["args"] = ["--no-sandbox", "--disable-setuid-sandbox"]
+
+        browser = playwright.chromium.launch(**launch_kwargs)
         context = browser.new_context(
             viewport={"width": 1440, "height": 900},
             user_agent=(

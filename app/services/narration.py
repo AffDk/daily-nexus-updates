@@ -28,6 +28,24 @@ _LEADING_GREETING_PATTERNS = (
 )
 
 
+def _trim_to_word_budget(script: str, max_words: int) -> str:
+    words = script.split()
+    if len(words) <= max_words:
+        return script.strip()
+
+    clipped = " ".join(words[:max_words]).strip()
+
+    # Prefer ending on sentence boundaries when possible.
+    for punct in (". ", "! ", "? "):
+        idx = clipped.rfind(punct)
+        if idx >= max(40, int(len(clipped) * 0.55)):
+            return clipped[: idx + 1].strip()
+
+    if clipped.endswith((".", "!", "?")):
+        return clipped
+    return clipped.rstrip(" ,;:-") + "."
+
+
 def _strip_leading_greeting(script: str) -> str:
     text = (script or "").strip()
     if not text:
@@ -201,6 +219,7 @@ Related coverage notes: {"; ".join(story.related_coverage_notes) or 'none'}
     script = (response.text or "").strip()
     if not script:
         return _fallback_story_script(story, target_seconds)
-    if len(script.split()) < target_words:
-        script = f"{script}\n\n{_fallback_story_script(story, target_seconds)}"
+
+    max_words = max(35, int(target_words * 1.02))
+    script = _trim_to_word_budget(script, max_words=max_words)
     return _ensure_complete_story_ending(script, story)
